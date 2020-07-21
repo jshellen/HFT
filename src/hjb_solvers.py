@@ -7,7 +7,7 @@ __author__      = "Juha-Samuli Hellen"
 
 class MM_Model_Parameters:
 
-    def __init__(self, lambda_m, lambda_p, kappa_m, kappa_p, delta, phi, alpha, q_min, q_max, T, cost):
+    def __init__(self, lambda_m, lambda_p, kappa_m, kappa_p, delta, phi, alpha, q_min, q_max, T, cost, rebate):
         
         if(not isinstance(lambda_m,(float,int,np.int32,np.int64))):
             raise TypeError(f'lambda_m has to be type of <float> or <int>, not {type(lambda_m)}')
@@ -32,7 +32,13 @@ class MM_Model_Parameters:
         
         if(q_max <= q_min):
             raise ValueError('q_max has to be larger than q_min!')
-        
+
+        if(not isinstance(cost,(float,int,np.int32,np.int64))):
+            raise TypeError('cost has to be type of <int>')
+
+        if(not isinstance(rebate,(float,int,np.int32,np.int64))):
+            raise TypeError('rebate has to be type of <int>')
+
         self.m_lambda_m = lambda_m # Order-flow at be bid
         self.m_lambda_p = lambda_p # Order flow at the offer
         self.m_kappa_m = lambda_m # Order-flow decay at be bid
@@ -46,6 +52,7 @@ class MM_Model_Parameters:
         self.m_q_min = q_min 
         self.m_q_max = q_max
         self.m_cost = cost
+        self.m_rebate = rebate
     
     @property
     def lambda_m(self):
@@ -123,7 +130,14 @@ class MM_Model_Parameters:
         Return copy of the trading cost.
         """        
         return deepcopy(self.m_cost) 
-    
+
+    @property
+    def rebate(self):
+        """
+        Return copy of the trading cost.
+        """
+        return deepcopy(self.m_rebate)
+
 class AS_Model_Output:
  
     def __init__(self, l_p,  l_m,h, q_lookup, q_grid, t_grid, N_steps, params):
@@ -229,9 +243,9 @@ class AS2P_Finite_Difference_Solver:
         q_grid = [q for q in range(params.q_max, params.q_min-1, -1)]
         q_map = dict( (q, i) for i, q in enumerate(q_grid))
         q_lookup = lambda q : q_map[q] 
-        
-        C1 = params.lambda_p / (np.e * params.kappa_p)
-        C2 = params.lambda_m / (np.e * params.kappa_m)
+
+        C1 = (params.lambda_p / np.e) * (1.0/params.kappa_p - params.rebate)
+        C2 = (params.lambda_m / np.e) * (1.0/params.kappa_m - params.rebate)
     
         # Terminal time
         T = params.T
@@ -263,14 +277,14 @@ class AS2P_Finite_Difference_Solver:
             for q in range(params.q_max, params.q_min-1, -1):
                 if q == params.q_max:
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi*q**2)
-                                            + C1 * np.exp(params.kappa_p*(h_prev[q_lookup(q-1)]-h_prev[q_lookup(q)])))*dt
+                                            + C1 * np.exp(params.kappa_p*(params.rebate+h_prev[q_lookup(q-1)]-h_prev[q_lookup(q)])))*dt
                 elif q == params.q_min:
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi*q**2) 
-                                         + C2 * np.exp(params.kappa_m*(h_prev[q_lookup(q+1)]-h_prev[q_lookup(q)])))*dt
+                                         + C2 * np.exp(params.kappa_m*(params.rebate+h_prev[q_lookup(q+1)]-h_prev[q_lookup(q)])))*dt
                 else:
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi*q**2) 
-                                         + C1 * np.exp(params.kappa_p*(h_prev[q_lookup(q-1)]-h_prev[q_lookup(q)])) 
-                                         + C2 * np.exp(params.kappa_m*(h_prev[q_lookup(q+1)]-h_prev[q_lookup(q)])))*dt
+                                         + C1 * np.exp(params.kappa_p*(params.rebate+h_prev[q_lookup(q-1)]-h_prev[q_lookup(q)]))
+                                         + C2 * np.exp(params.kappa_m*(params.rebate+h_prev[q_lookup(q+1)]-h_prev[q_lookup(q)])))*dt
             
             # Set euler approximated value for h_cur
             h[:, idx-1] = h_cur
@@ -279,10 +293,10 @@ class AS2P_Finite_Difference_Solver:
         d_p = {}
         d_m = {}
         for q in range(params.q_max, params.q_min, -1):
-            d_p[q] = (h[q_lookup(q)] - h[q_lookup(q-1)]) + (1. / params.kappa_p)
+            d_p[q] = (h[q_lookup(q)] - h[q_lookup(q-1)]) + (1. / params.kappa_p) - params.rebate
 
         for q in range(params.q_min, params.q_max):
-            d_m[q] = (h[q_lookup(q)] - h[q_lookup(q+1)]) + (1. / params.kappa_m)
+            d_m[q] = (h[q_lookup(q)] - h[q_lookup(q+1)]) + (1. / params.kappa_m) - params.rebate
         
         return AS_Model_Output(d_p, d_m, h, q_lookup, q_grid, t_grid, N_steps, params)
 
@@ -309,10 +323,10 @@ class AS3P_Finite_Difference_Solver:
         n = params.q_max - params.q_min + 1 
         q_grid = [q for q in range(params.q_max, params.q_min-1, -1)]
         q_map = dict( (q, i) for i, q in enumerate(q_grid))
-        q_lookup = lambda q : q_map[q] 
-        
-        C1 = params.lambda_p / (np.e * params.kappa_p)
-        C2 = params.lambda_m / (np.e * params.kappa_m)
+        q_lookup = lambda q : q_map[q]
+
+        C1 = (params.lambda_p / np.e) * (1.0 / params.kappa_p - params.rebate)
+        C2 = (params.lambda_m / np.e) * (1.0 / params.kappa_m - params.rebate)
     
         # Terminal time
         T = params.T
@@ -348,20 +362,20 @@ class AS3P_Finite_Difference_Solver:
                 # At upper inventory limit post only sell LO
                 if q == params.q_max:
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi*q**2)
-                                            + C1 * np.exp(params.kappa_p*(
+                                            + C1 * np.exp(params.kappa_p*(params.rebate+
                                                 h_prev[q_lookup(q-1)]-h_prev[q_lookup(q)])))*dt
                     
                 # At lower inventory limit post only buy LO
                 elif q == params.q_min:
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi*q**2) 
-                                         + C2 * np.exp(params.kappa_m*(
+                                         + C2 * np.exp(params.kappa_m*(params.rebate+
                                              h_prev[q_lookup(q+1)]-h_prev[q_lookup(q)])))*dt
                 # Post both sides
                 else:
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi*q**2) 
-                                         + C1 * np.exp(params.kappa_p*(
+                                         + C1 * np.exp(params.kappa_p*(params.rebate+
                                              h_prev[q_lookup(q-1)]-h_prev[q_lookup(q)])) 
-                                         + C2 * np.exp(params.kappa_m*(
+                                         + C2 * np.exp(params.kappa_m*(params.rebate+
                                              h_prev[q_lookup(q+1)]-h_prev[q_lookup(q)])))*dt
             
             # Set euler approximated value for h_cur
@@ -425,10 +439,10 @@ class AS3P_Finite_Difference_Solver:
         d_p = {}
         d_m = {}
         for q in range(params.q_max, params.q_min, -1):
-            d_p[q] = (h[q_lookup(q)] - h[q_lookup(q-1)]) + (1. / params.kappa_p)
+            d_p[q] = (h[q_lookup(q)] - h[q_lookup(q-1)]) + (1. / params.kappa_p) - params.rebate
 
         for q in range(params.q_min, params.q_max):
-            d_m[q] = (h[q_lookup(q)] - h[q_lookup(q+1)]) + (1. / params.kappa_m)
+            d_m[q] = (h[q_lookup(q)] - h[q_lookup(q+1)]) + (1. / params.kappa_m) - params.rebate
         
         return impulses, AS_Model_Output(d_p, d_m, h, q_lookup, q_grid, t_grid, N_steps, params)    
     

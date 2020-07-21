@@ -1,5 +1,5 @@
 import numpy as np
-import matplotlib.pyplot as pp;
+import matplotlib.pyplot as pp
 
 from src.hjb_solvers import (
     MM_Model_Parameters,
@@ -18,7 +18,8 @@ def create_as3p_model_solutions():
     alpha = 0.0001
     q_min = -25
     q_max = 25
-    cost = 0.001
+    cost = 0.005
+    rebate = 0.0025
     T = 5 # minutes
     n = 5*60 # one step per second
     
@@ -30,8 +31,8 @@ def create_as3p_model_solutions():
     ax.set_xlabel('distance from mid')
     ax.set_ylabel('fill rate (fills/minute)')
     
-    parameters = MM_Model_Parameters(lambda_m, lambda_p ,kappa_m, kappa_p, delta,
-                                   phi, alpha, q_min, q_max, T, cost)
+    parameters = MM_Model_Parameters(lambda_m, lambda_p, kappa_m, kappa_p, delta,
+                                   phi, alpha, q_min, q_max, T, cost, rebate)
     
     impulses, model = AS3P_Finite_Difference_Solver.solve(parameters, N_steps=n)
     
