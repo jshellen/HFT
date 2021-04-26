@@ -3,7 +3,7 @@ import numpy as np
 from enum import Enum
 from copy import deepcopy
 
-__author__      = "Juha-Samuli Hellen"
+__author__ = "Juha-Samuli Hellen"
 
 class MM_Model_Parameters:
 
@@ -138,9 +138,10 @@ class MM_Model_Parameters:
         """
         return deepcopy(self.m_rebate)
 
+
 class AS_Model_Output:
  
-    def __init__(self, l_p,  l_m,h, q_lookup, q_grid, t_grid, N_steps, params):
+    def __init__(self, l_p,  l_m, h, q_lookup, q_grid, t_grid, N_steps, params):
         
         self.m_l_p = l_p
         self.m_l_m = l_m
@@ -193,56 +194,55 @@ class AS_Model_Output:
 
         """
         return deepcopy(self.m_t_grid)
-        
-        
+
     @property
     def N_steps(self):
         
         return deepcopy(self.m_N_steps)
-    
-    def get_l_plus(self,q,t):
+
+    def get_l_plus(self, q):
+
+        return self.m_l_p[q]
+
+    def get_l_minus(self, q):
+        return self.m_l_m[q]
+
+    def get_l_plus_q_t(self, q, t):
         """
         Returns SELL decision given inventory q and time remaining till end of
         trading day t.
         """
-        t_idx = filter(lambda x: x>=t, self.m_t_grid)[0]
-        
-        if(q in self.m_q_lookup):
-            q_idx = self.m_q_lookup[q]
-        else:
-            raise KeyError(f'Inventory level {q} exceeds inventory grid used in pre-computation.')
-            
-        return self.m_l_p[t_idx,q_idx]
+        t_idx = next(filter(lambda x: x[1] >= t, enumerate(self.m_t_grid)))[0]
 
-    def get_l_minus(self,q,t):
+        return self.m_l_p[q][t_idx]
+
+    def get_l_minus_q_t(self, q, t):
         """
         Returns BUY decision given inventory q and time remaining till end of
         trading day t.
         """        
-        t_idx = filter(lambda x: x>=t, self.m_t_grid)[0]        
-        if(q in self.m_q_lookup):
-            q_idx = self.m_q_lookup[q]
-        else:
-            raise KeyError(f'Inventory level {q} exceeds inventory grid used in pre-computation.')
-        
-        return self.m_l_m[t_idx,q_idx]
-       
+        t_idx = filter(lambda x: x >= t, self.m_t_grid)[0]
+
+        return self.m_l_m[q][t_idx]
+
+
 _EFF_ZERO = 1E-10
+
 
 class AS2P_Finite_Difference_Solver:
     """
     Avellaneda Stoikov ++ model with terminal and running inventory penalties
     """
     @staticmethod
-    def solve(params, N_steps = 500):
+    def solve(params, N_steps=500):
         """
         Solves the optimal bid and ask spreads for a mm algorithm 
         using backward Euler finite difference scheme.
         """    
         n = params.q_max - params.q_min + 1 
         q_grid = [q for q in range(params.q_max, params.q_min-1, -1)]
-        q_map = dict( (q, i) for i, q in enumerate(q_grid))
-        q_lookup = lambda q : q_map[q] 
+        q_map = dict((q, i) for i, q in enumerate(q_grid))
+        q_lookup = lambda q: q_map[q]
 
         C1 = (params.lambda_p / np.e) * (1.0/params.kappa_p - params.rebate)
         C2 = (params.lambda_m / np.e) * (1.0/params.kappa_m - params.rebate)
@@ -300,6 +300,7 @@ class AS2P_Finite_Difference_Solver:
         
         return AS_Model_Output(d_p, d_m, h, q_lookup, q_grid, t_grid, N_steps, params)
 
+
 class AS3P_Finite_Difference_Solver:
     """
     Avellaneda Stoikov +++ model with terminal and running inventory penalties
@@ -308,7 +309,7 @@ class AS3P_Finite_Difference_Solver:
     @ Juha Hellén
     """
     @staticmethod
-    def solve(params, N_steps = 500):
+    def solve(params, N_steps=500):
         """
         Runs implicit backward Euler finite difference scheme for HJB part
         and then solves the double obstacle QVI problem given information
