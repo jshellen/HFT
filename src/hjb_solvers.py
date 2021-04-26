@@ -7,52 +7,53 @@ __author__ = "Juha-Samuli Hellen"
 
 class MM_Model_Parameters:
 
-    def __init__(self, lambda_m, lambda_p, kappa_m, kappa_p, delta, phi, alpha, q_min, q_max, T, cost, rebate):
+    def __init__(self, lambda_m, lambda_p, kappa_m, kappa_p, delta, phi, alpha, q_min, q_max, T, cost, rebate, tick):
         
-        if(not isinstance(lambda_m,(float,int,np.int32,np.int64))):
+        if not isinstance(lambda_m, (float, int, np.int32, np.int64)):
             raise TypeError(f'lambda_m has to be type of <float> or <int>, not {type(lambda_m)}')
 
-        if(not isinstance(lambda_p,(float,int,np.int32,np.int64))):
+        if not isinstance(lambda_p, (float, int, np.int32, np.int64)):
             raise TypeError(f'lambda_p has to be type of <float> or <int>, not {type(lambda_m)}')       
 
-        if(not isinstance(delta,(float,int,np.int32,np.int64))):
+        if not isinstance(delta, (float, int, np.int32, np.int64)):
             raise TypeError('delta has to be type of <float> or <int>')
 
-        if(not isinstance(phi,(float,int,np.int32,np.int64))):
+        if not isinstance(phi, (float, int, np.int32, np.int64)):
             raise TypeError('phi has to be type of <float> or <int>')
 
-        if(not isinstance(alpha,(float,int,np.int32,np.int64))):
+        if not isinstance(alpha, (float, int, np.int32, np.int64)):
             raise TypeError('alpha has to be type of <float> or <int>')            
 
-        if(not isinstance(q_min,(int,np.int32,np.int64))):
+        if not isinstance(q_min, (int, np.int32, np.int64)):
             raise TypeError('q_min has to be type of <int>')  
             
-        if(not isinstance(q_max,(int,np.int32,np.int64))):
+        if not isinstance(q_max, (int, np.int32, np.int64)):
             raise TypeError('q_max has to be type of <int>')  
         
-        if(q_max <= q_min):
+        if q_max <= q_min:
             raise ValueError('q_max has to be larger than q_min!')
 
-        if(not isinstance(cost,(float,int,np.int32,np.int64))):
+        if not isinstance(cost, (float, int, np.int32, np.int64)):
             raise TypeError('cost has to be type of <int>')
 
-        if(not isinstance(rebate,(float,int,np.int32,np.int64))):
+        if not isinstance(rebate, (float, int, np.int32, np.int64)):
             raise TypeError('rebate has to be type of <int>')
 
-        self.m_lambda_m = lambda_m # Order-flow at be bid
-        self.m_lambda_p = lambda_p # Order flow at the offer
-        self.m_kappa_m = lambda_m # Order-flow decay at be bid
-        self.m_kappa_p = lambda_p # Order flow decay at the offer
+        self.m_lambda_m = lambda_m  # Order-flow at be bid
+        self.m_lambda_p = lambda_p  # Order flow at the offer
+        self.m_kappa_m = kappa_m  # Order-flow decay at be bid
+        self.m_kappa_p = kappa_p  # Order flow decay at the offer
         self.m_T = T
         
-        self.m_delta = delta # average "edge" with respect to mid-price
-        self.m_phi = phi # running inventory penalty 
-        self.m_alpha = alpha # terminal inventory penalty
+        self.m_delta = delta  # average "edge" with respect to mid-price
+        self.m_phi = phi  # running inventory penalty
+        self.m_alpha = alpha  # terminal inventory penalty
         
         self.m_q_min = q_min 
         self.m_q_max = q_max
         self.m_cost = cost
         self.m_rebate = rebate
+        self.m_tick_size = tick
     
     @property
     def lambda_m(self):
@@ -138,6 +139,13 @@ class MM_Model_Parameters:
         """
         return deepcopy(self.m_rebate)
 
+    @property
+    def tick_size(self):
+        """
+        Return a copy of the tick size.
+        """
+        return deepcopy(self.m_tick_size)
+
 
 class AS_Model_Output:
  
@@ -184,27 +192,34 @@ class AS_Model_Output:
     @property
     def q_grid(self):
         """
-
+        Inventory grid
         """
         return deepcopy(self.m_q_grid)
         
     @property
     def t_grid(self):
         """
-
+        Time grid
         """
         return deepcopy(self.m_t_grid)
 
     @property
     def N_steps(self):
-        
+        """
+        Number of finite difference time steps
+        """
         return deepcopy(self.m_N_steps)
 
     def get_l_plus(self, q):
-
+        """
+        Optimal offer skews
+        """
         return self.m_l_p[q]
 
     def get_l_minus(self, q):
+        """
+        Optimal bid skews
+        """
         return self.m_l_m[q]
 
     def get_l_plus_q_t(self, q, t):
@@ -301,6 +316,132 @@ class AS2P_Finite_Difference_Solver:
         return AS_Model_Output(d_p, d_m, h, q_lookup, q_grid, t_grid, N_steps, params)
 
 
+class AS2P_Discrete_Ticks_Finite_Difference_Solver:
+
+    @staticmethod
+    def solve(params, N_steps=500):
+        """
+        Solves the optimal bid and ask spreads for a mm algorithm
+        using backward Euler finite difference scheme.
+        """
+        n = params.q_max - params.q_min + 1
+        q_grid = [q for q in range(params.q_max, params.q_min - 1, -1)]
+        q_map = dict((q, i) for i, q in enumerate(q_grid))
+        q_lookup = lambda q: q_map[q]
+
+        C1 = (params.lambda_p / np.e) * (1.0 / params.kappa_p - params.rebate)
+        C2 = (params.lambda_m / np.e) * (1.0 / params.kappa_m - params.rebate)
+
+        # Terminal time
+        T = params.T
+
+        # Time step for finite difference
+        dt = T / N_steps
+
+        # Value function
+        h = np.zeros((n, N_steps))
+        h[:, -1] = np.array([-params.alpha * q ** 2 for q in q_grid])
+
+        # Time points
+        t_grid = np.zeros(N_steps)
+        t_grid[-1] = T
+
+        # Matrices for optimal postings
+        delta_m = np.zeros((len(q_grid), N_steps))
+        delta_p = np.zeros((len(q_grid), N_steps))
+
+        # Compute
+        for idx in range(N_steps - 1, 0, -1):
+
+            # Update time
+            t_grid[idx - 1] = t_grid[idx] - dt
+
+            # Value function vector for current time step
+            h_cur = np.zeros(n)
+
+            # Value function vector for previous time step
+            h_prev = h[:, idx]
+
+            # Loop all inventory levels
+            for q in range(params.q_max, params.q_min - 1, -1):
+                if q == params.q_max:
+
+                    # Change in h due to jump down in inventory
+                    d_h_q = h_prev[q_lookup(q - 1)] - h_prev[q_lookup(q)] + params.rebate
+
+                    # Changes for each discrete tick
+                    d_hs = np.zeros(10)
+                    for d_plus in range(0, 10):
+                        fill_prob = np.exp(-params.kappa_p * d_plus)
+                        d_hs[d_plus] = fill_prob * ((d_plus + 1) * params.tick_size) * d_h_q
+
+                    # Find index for maximum
+                    ix_max = np.argmax(d_hs)
+
+                    # Save optimal posting
+                    delta_p[q_lookup(q), idx - 1] = ix_max
+
+                    # Solve value function
+                    h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi * q ** 2)
+                                                                + params.lambda_p * d_hs[ix_max]) * dt
+
+                elif q == params.q_min:
+
+                    # Change in h due to jump down in inventory
+                    d_h_q = h_prev[q_lookup(q + 1)] - h_prev[q_lookup(q)] + params.rebate
+
+                    # Changes for each discrete tick
+                    d_hs = np.zeros(10)
+                    for d_minus in range(0, 10):
+                        d_hs[d_minus] = np.exp(-params.kappa_p * d_minus) * ((d_minus + 1) * params.tick_size) * d_h_q
+
+                    # Find index for maximum
+                    ix_max = np.argmax(d_hs)
+
+                    # Save optimal posting
+                    delta_m[q_lookup(q), idx - 1] = ix_max
+
+                    h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi * q ** 2)
+                                                                + params.lambda_p * d_hs[ix_max]) * dt
+
+                else:
+
+                    # Change in h due to jump down in inventory
+                    d_h_q_p = h_prev[q_lookup(q - 1)] - h_prev[q_lookup(q)] + params.rebate
+
+                    # Changes for each discrete tick
+                    d_hs_p = np.zeros(10)
+                    for d_plus in range(0, 10):
+                        d_hs_p[d_plus] = np.exp(-params.kappa_p * d_plus) * ((d_plus + 1) * params.tick_size) * d_h_q_p
+
+                    # Find index for maximum
+                    ix_max_p = np.argmax(d_hs_p)
+
+                    # Change in h due to jump down in inventory
+                    d_h_q_m = h_prev[q_lookup(q + 1)] - h_prev[q_lookup(q)] + params.rebate
+
+                    # Changes for each discrete tick
+                    d_hs_m = np.zeros(10)
+                    for d_minus in range(0, 10):
+                        d_hs_m[d_minus] = np.exp(-params.kappa_p * d_minus) * ((d_minus + 1) * params.tick_size) * d_h_q_m
+
+                    # Find index for maximum
+                    ix_max_m = np.argmax(d_hs_m)
+
+                    # Save optimal posting
+                    delta_p[q_lookup(q), idx - 1] = ix_max_p
+                    delta_m[q_lookup(q), idx - 1] = ix_max_m
+
+                    h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi * q ** 2)
+                                                                + params.lambda_p * d_hs_p[ix_max_p]
+                                                                + params.lambda_m * d_hs_m[ix_max_m]) * dt
+
+            # Set euler approximated value for h_cur
+            h[:, idx - 1] = h_cur
+
+        return AS_Model_Output(delta_p, delta_m, h, q_lookup, q_grid, t_grid, N_steps, params)
+
+
 class AS3P_Finite_Difference_Solver:
     """
     Avellaneda Stoikov +++ model with terminal and running inventory penalties
@@ -324,7 +465,7 @@ class AS3P_Finite_Difference_Solver:
         n = params.q_max - params.q_min + 1 
         q_grid = [q for q in range(params.q_max, params.q_min-1, -1)]
         q_map = dict( (q, i) for i, q in enumerate(q_grid))
-        q_lookup = lambda q : q_map[q]
+        q_lookup = lambda q: q_map[q]
 
         C1 = (params.lambda_p / np.e) * (1.0 / params.kappa_p - params.rebate)
         C2 = (params.lambda_m / np.e) * (1.0 / params.kappa_m - params.rebate)
@@ -381,9 +522,7 @@ class AS3P_Finite_Difference_Solver:
             
             # Set euler approximated value for h_cur
             h_hjb[:, idx-1] = h_cur
-        
-        
-        
+
         # (2) Run QVI checking: max(HJB part, Send buy MO, Send sell MO)
         h = h_hjb.copy()
         impulses = np.zeros((n, N_steps))
@@ -426,16 +565,14 @@ class AS3P_Finite_Difference_Solver:
                     
                     # Hedge by sending sell MO
                     qvi_values[2] = h[q_lookup(q-1), idx] - params.cost
-                    
-                
+
                 # Satisfy HJB-QVI conditions
                 h_qvi[q_lookup(q)] = np.max(qvi_values)    
                 i_[q_lookup(q)] = np.argmax(qvi_values)
                 
             h_hjb[:, idx] = h_qvi
             impulses[:, idx] = i_
-        
-        
+
         # (3) Solve optimal bid-ask spreads for the continuation region
         d_p = {}
         d_m = {}

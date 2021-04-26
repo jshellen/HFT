@@ -5,15 +5,59 @@ from src.hjb_solvers import (
     MM_Model_Parameters,
     AS2P_Finite_Difference_Solver,
     AS3P_Finite_Difference_Solver,
+    AS2P_Discrete_Ticks_Finite_Difference_Solver
 )
+
+
+def create_as2p_discrete_model_solutions():
+
+    lambda_m = 50
+    lambda_p = 50
+    kappa_m = 10
+    kappa_p = 10
+    delta = 0
+    phi = 0.0001
+    alpha = 0.00001
+    q_min = -25
+    q_max = 25
+    cost = 0.000
+    rebate = 0.0025
+    tick = 0.5
+    T = 1  # minutes
+    n = 5 * 500  # one step per second
+
+    parameters = MM_Model_Parameters(lambda_m, lambda_p, kappa_m, kappa_p, delta,
+                                     phi, alpha, q_min, q_max, T, cost, rebate, tick)
+
+    solution = AS2P_Discrete_Ticks_Finite_Difference_Solver.solve(parameters, N_steps=n)
+
+    fig, ax = pp.subplots(1, 2, figsize=(12, 4))
+    ax[0].plot(solution.t_grid, solution.get_l_plus(20))
+    ax[0].plot(solution.t_grid, solution.get_l_plus(10))
+    ax[0].plot(solution.t_grid, solution.get_l_plus(0))
+    ax[0].plot(solution.t_grid, solution.get_l_plus(-10))
+    ax[0].plot(solution.t_grid, solution.get_l_plus(-20))
+    ax[0].set_title("Ask skews")
+    ax[0].set_ylabel("Skew")
+    ax[0].set_xlabel("Time")
+
+    ax[1].plot(solution.t_grid, solution.get_l_minus(20))
+    ax[1].plot(solution.t_grid, solution.get_l_minus(10))
+    ax[1].plot(solution.t_grid, solution.get_l_minus(0))
+    ax[1].plot(solution.t_grid, solution.get_l_minus(-10))
+    ax[1].plot(solution.t_grid, solution.get_l_minus(-20))
+    ax[1].set_title("Bid skews")
+    ax[1].set_ylabel("Skew")
+    ax[1].set_xlabel("Time")
+    pp.show()
 
 
 def create_as2p_model_solutions():
 
     lambda_m = 50
     lambda_p = 50
-    kappa_m = 100
-    kappa_p = 100
+    kappa_m = 1
+    kappa_p = 1
     delta = 0
     phi = 0.0001
     alpha = 0.0000001
@@ -21,11 +65,12 @@ def create_as2p_model_solutions():
     q_max = 25
     cost = 0.000
     rebate = 0.000
+    tick = 0.01
     T = 5  # minutes
     n = 5 * 100  # one step per second
 
     parameters = MM_Model_Parameters(lambda_m, lambda_p, kappa_m, kappa_p, delta,
-                                     phi, alpha, q_min, q_max, T, cost, rebate)
+                                     phi, alpha, q_min, q_max, T, cost, rebate, tick)
 
     solution = AS2P_Finite_Difference_Solver.solve(parameters, N_steps=n)
 
