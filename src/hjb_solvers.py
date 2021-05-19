@@ -7,7 +7,8 @@ __author__ = "Juha-Samuli Hellen"
 
 class MM_Model_Parameters:
 
-    def __init__(self, lambda_m, lambda_p, kappa_m, kappa_p, delta, phi, alpha, q_min, q_max, T, cost, rebate, tick):
+    def __init__(self, lambda_m, lambda_p, kappa_m, kappa_p, delta, epsilon_m, epsilon_p,
+                 phi, alpha, q_min, q_max, T, cost, rebate, tick):
         
         if not isinstance(lambda_m, (float, int, np.int32, np.int64)):
             raise TypeError(f'lambda_m has to be type of <float> or <int>, not {type(lambda_m)}')
@@ -43,6 +44,8 @@ class MM_Model_Parameters:
         self.m_lambda_p = lambda_p  # Order flow at the offer
         self.m_kappa_m = kappa_m  # Order-flow decay at be bid
         self.m_kappa_p = kappa_p  # Order flow decay at the offer
+        self.m_epsilon_p = epsilon_p  # adverse selection per unit volume
+        self.m_epsilon_m = epsilon_m  # adverse selection per unit volume
         self.m_T = T
         
         self.m_delta = delta  # average "edge" with respect to mid-price
@@ -82,7 +85,21 @@ class MM_Model_Parameters:
         Return copy of the order flow parameter at the ask
         """        
         return deepcopy(self.m_kappa_p)
-    
+
+    @property
+    def epsilon_m(self):
+        """
+        Return copy of the adverse selection at the bid
+        """
+        return deepcopy(self.m_epsilon_m)
+
+    @property
+    def epsilon_p(self):
+        """
+        Return copy of the adverse selection at the offer
+        """
+        return deepcopy(self.m_epsilon_p)
+
     @property
     def T(self):
         """
@@ -316,7 +333,10 @@ class AS2P_Finite_Difference_Solver:
         return AS_Model_Output(d_p, d_m, h, q_lookup, q_grid, t_grid, N_steps, params)
 
 
-class AS2P_Discrete_Ticks_Finite_Difference_Solver:
+class ASAS_Finite_Difference_Solver:
+    """
+    Avellaneda Stoikov ++ model with terminal and running inventory penalties
+    """
 
     @staticmethod
     def solve(params, N_steps=500):
@@ -329,8 +349,8 @@ class AS2P_Discrete_Ticks_Finite_Difference_Solver:
         q_map = dict((q, i) for i, q in enumerate(q_grid))
         q_lookup = lambda q: q_map[q]
 
-        C1 = (params.lambda_p / np.e) * (1.0 / params.kappa_p - params.rebate)
-        C2 = (params.lambda_m / np.e) * (1.0 / params.kappa_m - params.rebate)
+        c_p = 1.0 / params.kappa_p + params.epsilon_p
+        c_m = 1.0 / params.kappa_m + params.epsilon_m
 
         # Terminal time
         T = params.T
@@ -345,10 +365,6 @@ class AS2P_Discrete_Ticks_Finite_Difference_Solver:
         # Time points
         t_grid = np.zeros(N_steps)
         t_grid[-1] = T
-
-        # Matrices for optimal postings
-        delta_m = np.zeros((len(q_grid), N_steps))
-        delta_p = np.zeros((len(q_grid), N_steps))
 
         # Compute
         for idx in range(N_steps - 1, 0, -1):
@@ -366,80 +382,62 @@ class AS2P_Discrete_Ticks_Finite_Difference_Solver:
             for q in range(params.q_max, params.q_min - 1, -1):
                 if q == params.q_max:
 
-                    # Change in h due to jump down in inventory
-                    d_h_q = h_prev[q_lookup(q - 1)] - h_prev[q_lookup(q)] + params.rebate
+                    # optimal sell depth
+                    d_m = c_m - h_prev[q_lookup(q - 1)] + h_prev[q_lookup(q)]
 
-                    # Changes for each discrete tick
-                    d_hs = np.zeros(10)
-                    for d_plus in range(0, 10):
-                        fill_prob = np.exp(-params.kappa_p * d_plus)
-                        d_hs[d_plus] = fill_prob * ((d_plus + 1) * params.tick_size) * d_h_q
+                    dh_m = d_m - params.epsilon_m + h_prev[q_lookup(q - 1)] - h_prev[q_lookup(q)]
 
-                    # Find index for maximum
-                    ix_max = np.argmax(d_hs)
+                    # inventory drift
+                    d_i = (params.epsilon_p * params.lambda_p - params.epsilon_m * params.lambda_m) * q
 
-                    # Save optimal posting
-                    delta_p[q_lookup(q), idx - 1] = ix_max
-
-                    # Solve value function
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi * q ** 2)
-                                                                + params.lambda_p * d_hs[ix_max]) * dt
+                                       + params.lambda_m * np.exp(-params.kappa_m * d_m) * dh_m
+                                                                + d_i) * dt
 
                 elif q == params.q_min:
 
-                    # Change in h due to jump down in inventory
-                    d_h_q = h_prev[q_lookup(q + 1)] - h_prev[q_lookup(q)] + params.rebate
+                    # optimal buy depth
+                    d_p = c_p - h_prev[q_lookup(q + 1)] + h_prev[q_lookup(q)]
 
-                    # Changes for each discrete tick
-                    d_hs = np.zeros(10)
-                    for d_minus in range(0, 10):
-                        d_hs[d_minus] = np.exp(-params.kappa_p * d_minus) * ((d_minus + 1) * params.tick_size) * d_h_q
+                    dh_p = d_p - params.epsilon_p + h_prev[q_lookup(q + 1)] - h_prev[q_lookup(q)]
 
-                    # Find index for maximum
-                    ix_max = np.argmax(d_hs)
-
-                    # Save optimal posting
-                    delta_m[q_lookup(q), idx - 1] = ix_max
+                    d_i = (params.epsilon_p * params.lambda_p - params.epsilon_m * params.lambda_m) * q
 
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi * q ** 2)
-                                                                + params.lambda_p * d_hs[ix_max]) * dt
+                                       + params.lambda_p * np.exp(-params.kappa_p * d_p) * dh_p
+                                                                + d_i ) * dt
 
                 else:
 
-                    # Change in h due to jump down in inventory
-                    d_h_q_p = h_prev[q_lookup(q - 1)] - h_prev[q_lookup(q)] + params.rebate
+                    # optimal sell depth
+                    d_m = c_m - h_prev[q_lookup(q - 1)] + h_prev[q_lookup(q)]
 
-                    # Changes for each discrete tick
-                    d_hs_p = np.zeros(10)
-                    for d_plus in range(0, 10):
-                        d_hs_p[d_plus] = np.exp(-params.kappa_p * d_plus) * ((d_plus + 1) * params.tick_size) * d_h_q_p
+                    # optimal buy depth
+                    d_p = c_p - h_prev[q_lookup(q + 1)] + h_prev[q_lookup(q)]
 
-                    # Find index for maximum
-                    ix_max_p = np.argmax(d_hs_p)
+                    dh_m = d_m - params.epsilon_m + h_prev[q_lookup(q - 1)] - h_prev[q_lookup(q)]
+                    dh_p = d_p - params.epsilon_p + h_prev[q_lookup(q + 1)] - h_prev[q_lookup(q)]
 
-                    # Change in h due to jump down in inventory
-                    d_h_q_m = h_prev[q_lookup(q + 1)] - h_prev[q_lookup(q)] + params.rebate
-
-                    # Changes for each discrete tick
-                    d_hs_m = np.zeros(10)
-                    for d_minus in range(0, 10):
-                        d_hs_m[d_minus] = np.exp(-params.kappa_p * d_minus) * ((d_minus + 1) * params.tick_size) * d_h_q_m
-
-                    # Find index for maximum
-                    ix_max_m = np.argmax(d_hs_m)
-
-                    # Save optimal posting
-                    delta_p[q_lookup(q), idx - 1] = ix_max_p
-                    delta_m[q_lookup(q), idx - 1] = ix_max_m
+                    d_i = (params.epsilon_p * params.lambda_p - params.epsilon_m * params.lambda_m) * q
 
                     h_cur[q_lookup(q)] = h_prev[q_lookup(q)] + (-(params.phi * q ** 2)
-                                                                + params.lambda_p * d_hs_p[ix_max_p]
-                                                                + params.lambda_m * d_hs_m[ix_max_m]) * dt
+                                                        + params.lambda_m * np.exp(-params.kappa_m * d_m) * dh_m
+                                                        + params.lambda_p * np.exp(-params.kappa_p * d_p) * dh_p
+                                                                + d_i) * dt
 
             # Set euler approximated value for h_cur
             h[:, idx - 1] = h_cur
 
-        return AS_Model_Output(delta_p, delta_m, h, q_lookup, q_grid, t_grid, N_steps, params)
+        # Solve optimal bid-ask spreads
+        d_p = {}
+        d_m = {}
+        for q in range(params.q_max, params.q_min, -1):
+            d_p[q] = (h[q_lookup(q)] - h[q_lookup(q - 1)]) + (1. / params.kappa_p) + params.epsilon_p
+
+        for q in range(params.q_min, params.q_max):
+            d_m[q] = (h[q_lookup(q)] - h[q_lookup(q + 1)]) + (1. / params.kappa_m) + params.epsilon_m
+
+        return AS_Model_Output(d_p, d_m, h, q_lookup, q_grid, t_grid, N_steps, params)
 
 
 class AS3P_Finite_Difference_Solver:
