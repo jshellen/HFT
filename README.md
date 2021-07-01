@@ -18,3 +18,7 @@ This repository contains semi random collection of "High Frequency Market Making
   - Running inventory penalty
   - Hedging areas using QVI conditions over value function
   - Factors liquidity rebate into the optimal distances
+
+**ASMP**
+  - Avellaneda Stoikov inspired model
+  - Incorporates Stoikov's Micro-Price model into the optimal decision to either be at the best bid or offer.
