@@ -1,5 +1,5 @@
 # HFT
-This repository contains semi random collection of "High Frequency Market Making" algorithms created using stochastic optimal control
+This repository contains semi random collection of "High Frequency Market Making" algorithms created using stochastic optimal control. Resulting Dynamic Programming Equations are solved using simple Euler finite difference scheme.
 
 **AS++**
   - Avellaneda Stoikov inspired model
